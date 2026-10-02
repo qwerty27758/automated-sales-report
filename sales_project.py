@@ -22,27 +22,29 @@ def create_report():
         )
 
         response.raise_for_status()
-
-    url = "https://jsonplaceholder.typicode.com/posts"
-
-    # Получаем данные с API и создаем DataFrame
-    response = requests.get(url, timeout=10)
-    response.raise_for_status()
-
-    data = response.json()
-
-    # Создаем DataFrame из полученных данных
-    df = pd.DataFrame(data)
-
-    # Добавляем стабильные значения для количества, цены и себестоимости
-    df["Количество"] = (df["id"] % 10) + 1
-    df["Цена"] = 1000 + (df["id"] % 10) * 500
-    df["Себестоимость"] = 500 + (df["id"] % 7) * 400
-
+    
+    # Загружаем данные о продажах из CSV
+    df = pd.read_csv("sales.csv")
+ 
     df["Выручка"] = df["Количество"] * df["Цена"]
     df["Расходы"] = df["Количество"] * df["Себестоимость"]
     df["Прибыль"] = df["Выручка"] - df["Расходы"]
-    df["Маржа"] = df["Прибыль"] / df["Выручка"] * 100
+    df["Маржа"] = df["Прибыль"] / df["Выручка"]
+
+    manager_summary = (
+    df.groupby("Менеджер")
+      .agg(
+          Заказов=("Товар", "count"),
+          Выручка=("Выручка", "sum"),
+          Расходы=("Расходы", "sum"),
+          Прибыль=("Прибыль", "sum")
+      )
+      .reset_index()
+    )
+
+    manager_summary["Маржа"] = (
+        manager_summary["Прибыль"] / manager_summary["Выручка"]
+    )
 
     # Находим заказы с убытками
     loss_orders = df[df["Прибыль"] < 0]
@@ -51,30 +53,34 @@ def create_report():
     loss_orders_sorted = loss_orders.sort_values(by="Прибыль", ascending=True)
 
     # Метод loss_orders_sorted.iloc[0] возвращает первую строку, которая соответствует заказу с наибольшим убытком
-    worst_order = loss_orders_sorted.iloc[0]
+    if not loss_orders_sorted.empty:
+        worst_order = loss_orders_sorted.iloc[0]
+    else:
+        worst_order = None
 
-    print("Самый убыточный заказ:")
-    print(f"ID: {worst_order['id']}")
-    print(f"Выручка: {worst_order['Выручка']}")
-    print(f"Расходы: {worst_order['Расходы']}")
-    print(f"Прибыль: {worst_order['Прибыль']}")
-    print(f"Маржа: {worst_order['Маржа']:.2f}%", "\n")
+    if worst_order is not None:
+        print("Самый убыточный заказ:")
+        print(f"Клиент: {worst_order['Клиент']}")
+        print(f"Товар: {worst_order['Товар']}")
+        print(f"Выручка: {worst_order['Выручка']}")
+        print(f"Расходы: {worst_order['Расходы']}")
+        print(f"Прибыль: {worst_order['Прибыль']}")
+        print(f"Маржа: {worst_order['Маржа']:.2%}", "\n")
+    else:
+        print("Убыточных заказов нет.", "\n")
 
     total_revenue = df["Выручка"].sum()
     total_expenses = df["Расходы"].sum()
     total_profit = df["Прибыль"].sum()
-    average_margin = df[
-        "Маржа"
-    ].mean()  # .mean() используется для вычисления среднего арифметического значения по столбцу
-    total_margin = total_profit / total_revenue * 100  # Общая маржа всех заказов.
+    average_margin = df["Маржа"].mean()  # .mean() используется для вычисления среднего арифметического значения по столбцу
+    total_margin = total_profit / total_revenue  # Общая маржа всех заказов.
 
     print("Общая выручка:", total_revenue)
     print("Общие расходы:", total_expenses)
     print("Общая прибыль:", total_profit)
-    print(
-        "Средняя маржа:", f"{average_margin:.2f}%"
-    )  # f"{переменная:.2f}% округляет значение до двух знаков после запятой и добавляет знак процента
-    print("Общая маржа:", f"{total_margin:.2f}%")
+    print("Средняя маржа:", f"{average_margin:.2%}"
+    )  # f"{переменная:.2% округляет значение до двух знаков после запятой и добавляет знак процента
+    print("Общая маржа:", f"{total_margin:.2%}")
 
     # Создаем DataFrame для итогов
     summary = pd.DataFrame(
@@ -141,11 +147,12 @@ def create_report():
 
         # Форматируем данные на листе "Убыточные заказы"
         for row in range(2, loss_sheet.max_row + 1):
-            for column in ["F", "G", "H", "I", "J"]:
-                loss_sheet[f"{column}{row}"].number_format = '#,##0" ₽"'
-
-            # Формат маржи
-            loss_sheet[f"K{row}"].number_format = '0.00"%"'
+            loss_sheet[f"E{row}"].number_format = '#,##0" ₽"'
+            loss_sheet[f"F{row}"].number_format = '#,##0" ₽"'
+            loss_sheet[f"I{row}"].number_format = '#,##0" ₽"'
+            loss_sheet[f"J{row}"].number_format = '#,##0" ₽"'
+            loss_sheet[f"K{row}"].number_format = '#,##0" ₽"'
+            loss_sheet[f"L{row}"].number_format = '0.00%'
 
         # Выделяем отрицательную прибыль
         # Создаем заливку ячеек
@@ -153,7 +160,7 @@ def create_report():
             fill_type="solid", fgColor="FFC7CE"
         )  # Проходим по всем строкам
         for row in range(2, loss_sheet.max_row + 1):
-            profit_cell = loss_sheet[f"J{row}"]
+            profit_cell = loss_sheet[f"K{row}"]
             # Если прибыль отрицательная - применяется заливка
             if profit_cell.value < 0:
                 profit_cell.fill = negative_fill
@@ -162,7 +169,7 @@ def create_report():
         all_sheet = writer.book["Все заказы"]
 
         for row in range(2, all_sheet.max_row + 1):
-            profit_cell = all_sheet[f"J{row}"]
+            profit_cell = all_sheet[f"K{row}"]
 
             if profit_cell.value < 0:
                 profit_cell.fill = negative_fill
@@ -183,11 +190,23 @@ def create_report():
             cell.font = Font(bold=True)
             cell.fill = PatternFill(fill_type="solid", fgColor="D9EAF7")
         for row in range(2, all_sheet.max_row + 1):
-            for column in ["F", "G", "H", "I", "J"]:
-                all_sheet[f"{column}{row}"].number_format = '#,##0" ₽"'
+            # Цена
+            all_sheet[f"E{row}"].number_format = '#,##0" ₽"'
 
-            # Формат маржи
-            all_sheet[f"K{row}"].number_format = '0.00"%"'
+            # Себестоимость
+            all_sheet[f"F{row}"].number_format = '#,##0" ₽"'
+
+            # Выручка
+            all_sheet[f"I{row}"].number_format = '#,##0" ₽"'
+
+            # Расходы
+            all_sheet[f"J{row}"].number_format = '#,##0" ₽"'
+
+            # Прибыль
+            all_sheet[f"K{row}"].number_format = '#,##0" ₽"'
+
+            # Маржа
+            all_sheet[f"L{row}"].number_format = '0.00%'
 
         # Оформление заголовков
         for cell in all_sheet[1]:
@@ -196,6 +215,11 @@ def create_report():
 
         # Создаём лист для дашборда
         dashboard = writer.book.create_sheet("Дашборд")
+
+        # Создаём скрытый лист с техническими данными для графиков
+        chart_data = writer.book.create_sheet("Данные для графиков")
+        chart_data.sheet_state = "hidden"
+
         # Убираем сетку
         dashboard.sheet_view.showGridLines = False
 
@@ -225,7 +249,7 @@ def create_report():
             dashboard[cell].number_format = '#,##0" ₽"'
 
         # Формат маржи
-        dashboard["J4"].number_format = '0.00"%"'
+        dashboard["J4"].number_format = '0.00%'
         dashboard["M4"].number_format = "0"
 
         # Формат шрифтов
@@ -281,18 +305,18 @@ def create_report():
 
         chart.title = "Прибыль по заказам"
         chart.y_axis.title = "Прибыль, ₽"
-        chart.x_axis.title = "Заказ"
+        chart.x_axis.title = "Клиент"
 
         data = Reference(
             all_sheet,
-            min_col=10,  # берём 10-й столбец J, то есть прибыль
+            min_col=11,  # берём 11-й столбец J, то есть прибыль
             min_row=1,
             max_row=all_sheet.max_row,
         )
 
         categories = Reference(
             all_sheet,
-            min_col=2,  # берём ID заказа (столбец B) для горизонтальной оси
+            min_col=2,  # берём столбец B для горизонтальной оси
             min_row=2,
             max_row=all_sheet.max_row,
         )
@@ -315,16 +339,16 @@ def create_report():
         chart2.type = "col"
         chart2.title = "Выручка и расходы по заказам"
         chart2.y_axis.title = "Сумма, ₽"
-        chart2.x_axis.title = "ID заказа"
+        chart2.x_axis.title = "Клиент"
 
         # Данные по выручке
         revenue_data = Reference(
-            all_sheet, min_col=8, min_row=1, max_row=all_sheet.max_row
+             all_sheet, min_col=9, min_row=1, max_row=all_sheet.max_row
         )
 
         # Данные по расходам
         expenses_data = Reference(
-            all_sheet, min_col=9, min_row=1, max_row=all_sheet.max_row
+            all_sheet, min_col=10, min_row=1, max_row=all_sheet.max_row
         )
 
         # Добавляем обе серии данных
@@ -345,27 +369,28 @@ def create_report():
         # Создаем круговую диаграмму
         from openpyxl.chart import PieChart
 
-        # Технические данные для круговой диаграммы
-        dashboard["P40"] = "Тип заказа"
-        dashboard["Q40"] = "Количество"
+       # Технические данные для круговой диаграммы
+        chart_data["A1"] = "Тип заказа"
+        chart_data["B1"] = "Количество"
 
-        dashboard["P41"] = "Прибыльные"
-        dashboard["Q41"] = (df["Прибыль"] >= 0).sum()
+        chart_data["A2"] = "Прибыльные"
+        chart_data["B2"] = (df["Прибыль"] >= 0).sum()
 
-        dashboard["P42"] = "Убыточные"
-        dashboard["Q42"] = (df["Прибыль"] < 0).sum()
+        chart_data["A3"] = "Убыточные"
+        chart_data["B3"] = (df["Прибыль"] < 0).sum()
+
 
         pie = PieChart()
 
         pie.title = "Прибыльные и убыточные заказы"
 
         data = Reference(
-            dashboard, min_col=17, min_row=40, max_row=42
-        )  # N — Количество
+            chart_data, min_col=2, min_row=1, max_row=3
+        )   # B — Количество
 
         labels = Reference(
-            dashboard, min_col=16, min_row=41, max_row=42
-        )  # M — Тип заказа
+            chart_data, min_col=1, min_row=2, max_row=3
+        )  # A — Тип заказа
 
         pie.add_data(data, titles_from_data=True)
         pie.set_categories(labels)
@@ -376,15 +401,28 @@ def create_report():
         dashboard.add_chart(pie, "A36")
 
     # Отправка отчета в Telegram
+    if worst_order is not None:
+        worst_order_text = (
+            f"🔻 Самый убыточный заказ:\n"
+            f"Клиент: {worst_order['Клиент']}\n"
+            f"Товар: {worst_order['Товар']}\n"
+            f"Выручка: {worst_order['Выручка']:.2f} ₽\n"
+            f"Расходы: {worst_order['Расходы']:.2f} ₽\n"
+            f"Прибыль: {worst_order['Прибыль']:.2f} ₽\n"
+            f"Маржа: {worst_order['Маржа']:.2%}\n"
+        )
+    else:
+        worst_order_text = "🔻 Убыточных заказов нет.\n"
+
+
     telegram_message = (
-        "📊 Отчёт по продажам\n\n"
-        f"💰 Выручка: {total_revenue:,.0f} ₽\n"
-        f"💸 Расходы: {total_expenses:,.0f} ₽\n"
-        f"📈 Прибыль: {total_profit:,.0f} ₽\n"
-        f"📊 Общая маржа: {total_margin:.2f}%\n"
-        f"⚠️ Убыточных заказов: {len(loss_orders)}\n\n"
-        f"🔻 Самый убыточный заказ: №{int(worst_order['id'])}\n"
-        f"Прибыль: {worst_order['Прибыль']:,.0f} ₽"
+        f"📊 Отчёт по продажам\n\n"
+        f"Количество заказов: {len(df)}\n"
+        f"Общая выручка: {total_revenue:.2f} ₽\n"
+        f"Общие расходы: {total_expenses:.2f} ₽\n"
+        f"Общая прибыль: {total_profit:.2f} ₽\n"
+        f"Средняя маржа: {average_margin:.2%}\n\n"
+        f"{worst_order_text}"
     )
 
     send_telegram_message(telegram_message)
